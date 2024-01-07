@@ -4,7 +4,7 @@
 
 
 <p align="center">
-  <a href="https://github.com/AI-ASS/oneapi-air"><img src="web/air/public/logo.png" width="150" height="150" alt="one-api-air logo"></a>
+  <a href="https://github.com/AI-ASS/oneapi-air"><img src="./web/air/public/logo.png" width="150" height="150" alt="one-api-air logo"></a>
 </p>
 
 
