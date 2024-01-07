@@ -3,14 +3,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/songquanpeng/one-api"><img src="https://raw.githubusercontent.com/songquanpeng/one-api/main/web/default/public/logo.png" width="150" height="150" alt="one-api logo"></a>
+  <a href="https://github.com/AI-ASS/oneapi-air"><img src="web/air/public/logo.png" width="150" height="150" alt="one-api-air logo"></a>
 </p>
 
 <div align="center">
 
-# One API
+# One API Air
 
-_✨ Access all LLM through the standard OpenAI API format, easy to deploy & use ✨_
+_✨ A minimalist and modern theme that includes some new interface features to enhance your OneAPI! ✨_
 
 </div>
 

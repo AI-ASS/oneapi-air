@@ -4,14 +4,15 @@
 
 
 <p align="center">
-  <a href="https://github.com/songquanpeng/one-api"><img src="https://raw.githubusercontent.com/songquanpeng/one-api/main/web/default/public/logo.png" width="150" height="150" alt="one-api logo"></a>
+  <a href="https://github.com/AI-ASS/oneapi-air"><img src="web/air/public/logo.png" width="150" height="150" alt="one-api-air logo"></a>
 </p>
+
 
 <div align="center">
 
-# One API
+# One API Air
 
-_✨ 通过标准的 OpenAI API 格式访问所有的大模型，开箱即用 ✨_
+_✨ 一个简约、现代的主题，包含了一些新的界面特性，用于增强你的OneAPI！ ✨_
 
 </div>
 
