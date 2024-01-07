@@ -104,6 +104,7 @@ var Theme = GetOrDefaultString("THEME", "default")
 var ValidThemes = map[string]bool{
 	"default": true,
 	"berry":   true,
+	"air":     true,
 }
 
 const (
