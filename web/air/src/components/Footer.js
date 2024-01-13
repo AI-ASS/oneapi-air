@@ -38,14 +38,14 @@ const Footer = () => {
         ) : (
           <div className='custom-footer'>
             <a
-              href='https://github.com/songquanpeng/one-api'
+              href='https://github.com/AI-ASS/oneapi-air'
               target='_blank'
             >
               {systemName} {process.env.REACT_APP_VERSION}{' '}
             </a>
             由{' '}
             <a href='https://github.com/songquanpeng' target='_blank'>
-              JustSong
+              GAI Group & JustSong
             </a>{' '}
             构建，源代码遵循{' '}
             <a href='https://opensource.org/licenses/mit-license.php'>

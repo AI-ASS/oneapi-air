@@ -1,5 +1,5 @@
-import React, { useContext, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useContext, useEffect, useState } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { UserContext } from '../context/User';
 
 import { Button, Container, Dropdown, Icon, Menu, Segment } from 'semantic-ui-react';
@@ -11,7 +11,7 @@ let headerButtons = [
   {
     name: '首页',
     to: '/',
-    icon: 'home'
+    icon: 'globe'
   },
   {
     name: '渠道',
@@ -27,7 +27,7 @@ let headerButtons = [
   {
     name: '兑换',
     to: '/redemption',
-    icon: 'dollar sign',
+    icon: 'sync alternate',
     admin: true
   },
   {
@@ -52,7 +52,7 @@ let headerButtons = [
     icon: 'setting'
   },
   {
-    name: '关于',
+    name: '模型',
     to: '/about',
     icon: 'info circle'
   }
@@ -69,10 +69,28 @@ if (localStorage.getItem('chat_link')) {
 const Header = () => {
   const [userState, userDispatch] = useContext(UserContext);
   let navigate = useNavigate();
+  let location = useLocation();
 
   const [showSidebar, setShowSidebar] = useState(false);
-  const systemName = getSystemName();
+  const [systemName, setSystemName] = useState(getSystemName());
   const logo = getLogo();
+
+  useEffect(() => {
+    // if systemName, wait 500ms and check again, if still no systemName, check 500ms again
+    let remainCheckTimes = 5;
+    const timer = setInterval(() => {
+      if (remainCheckTimes <= 0) {
+        clearInterval(timer);
+        return;
+      }
+      remainCheckTimes--;
+      let system_name = getSystemName();
+      if (system_name) {
+        setSystemName(system_name);
+        clearInterval(timer);
+      }
+    }, 500);
+  })
 
   async function logout() {
     setShowSidebar(false);
@@ -89,23 +107,28 @@ const Header = () => {
 
   const renderButtons = (isMobile) => {
     return headerButtons.map((button) => {
+      let active = location.pathname === button.to;
+      let buttonClass = active ? 'activeButton' : '';
+      if (userState.user && button.name === '首页') return <></>;
+      if ((!userState.user && ['渠道', '令牌', '兑换', '充值', '用户', '日志', '设置'].includes(button.name)) || (button.admin && !isAdmin())) return <></>;
       if (button.admin && !isAdmin()) return <></>;
       if (isMobile) {
         return (
           <Menu.Item
+            className={buttonClass}
             onClick={() => {
               navigate(button.to);
               setShowSidebar(false);
             }}
           >
-            {button.name}
+            <span className={buttonClass}>{button.name}</span>
           </Menu.Item>
         );
       }
       return (
-        <Menu.Item key={button.name} as={Link} to={button.to}>
+        <Menu.Item key={button.name} as={Link} to={button.to} className={buttonClass}>
           <Icon name={button.icon} />
-          {button.name}
+          <span className={buttonClass}>{button.name}</span>
         </Menu.Item>
       );
     });

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Header, Segment } from 'semantic-ui-react';
 import { API, showError } from '../../helpers';
 import { marked } from 'marked';
+import { Layout } from "@douyinfe/semi-ui";
 
 const About = () => {
   const [about, setAbout] = useState('');
@@ -33,14 +33,23 @@ const About = () => {
     <>
       {
         aboutLoaded && about === '' ? <>
-          <Segment>
-            <Header as='h3'>关于</Header>
-            <p>可在设置页面设置关于内容，支持 HTML & Markdown</p>
-            项目仓库地址：
-            <a href='https://github.com/songquanpeng/one-api'>
-              https://github.com/songquanpeng/one-api
-            </a>
-          </Segment>
+          <Layout>
+            <Layout.Header>
+              <h3>关于</h3>
+            </Layout.Header>
+            <Layout.Content>
+              <p>
+                可在设置页面设置关于内容，支持 HTML & Markdown
+              </p>
+              One API Air项目仓库地址：
+              <a href='https://github.com/AI-ASS/oneapi-air'>
+                https://github.com/AI-ASS/oneapi-air
+              </a>
+              <p>
+                One API Air © 2023 GAI Group & JustSong | 基于 One API © 2023 JustSong。本项目根据MIT许可证授权。
+              </p>
+            </Layout.Content>
+          </Layout>
         </> : <>
           {
             about.startsWith('https://') ? <iframe

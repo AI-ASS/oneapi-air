@@ -1,13 +1,16 @@
 import React from 'react';
-import { Segment, Header } from 'semantic-ui-react';
 import TokensTable from '../../components/TokensTable';
-
+import { Layout } from "@douyinfe/semi-ui";
 const Token = () => (
   <>
-    <Segment>
-      <Header as='h3'>我的令牌</Header>
-      <TokensTable/>
-    </Segment>
+    <Layout>
+      <Layout.Header>
+        <h3>我的令牌</h3>
+      </Layout.Header>
+      <Layout.Content>
+        <TokensTable />
+      </Layout.Content>
+    </Layout>
   </>
 );
 
