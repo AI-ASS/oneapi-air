@@ -9,6 +9,7 @@ type Channel struct {
 	Id                 int     `json:"id"`
 	Type               int     `json:"type" gorm:"default:0"`
 	Key                string  `json:"key" gorm:"not null;index"`
+	OpenAIOrganization *string `json:"openai_organization"`
 	Status             int     `json:"status" gorm:"default:1"`
 	Name               string  `json:"name" gorm:"index"`
 	Weight             *uint   `json:"weight" gorm:"default:0"`
@@ -20,29 +21,42 @@ type Channel struct {
 	Balance            float64 `json:"balance"` // in USD
 	BalanceUpdatedTime int64   `json:"balance_updated_time" gorm:"bigint"`
 	Models             string  `json:"models"`
-	Group              string  `json:"group" gorm:"type:varchar(32);default:'default'"`
+	Group              string  `json:"group" gorm:"type:varchar(64);default:'default'"`
 	UsedQuota          int64   `json:"used_quota" gorm:"bigint;default:0"`
 	ModelMapping       *string `json:"model_mapping" gorm:"type:varchar(1024);default:''"`
 	Priority           *int64  `json:"priority" gorm:"bigint;default:0"`
+	AutoBan            *int    `json:"auto_ban" gorm:"default:1"`
 }
 
-func GetAllChannels(startIdx int, num int, selectAll bool) ([]*Channel, error) {
+func GetAllChannels(startIdx int, num int, selectAll bool, idSort bool) ([]*Channel, error) {
 	var channels []*Channel
 	var err error
+	order := "priority desc"
+	if idSort {
+		order = "id desc"
+	}
 	if selectAll {
-		err = DB.Order("id desc").Find(&channels).Error
+		err = DB.Order(order).Find(&channels).Error
 	} else {
-		err = DB.Order("id desc").Limit(num).Offset(startIdx).Omit("key").Find(&channels).Error
+		err = DB.Order(order).Limit(num).Offset(startIdx).Omit("key").Find(&channels).Error
 	}
 	return channels, err
 }
 
-func SearchChannels(keyword string) (channels []*Channel, err error) {
+func SearchChannels(keyword string, group string) (channels []*Channel, err error) {
 	keyCol := "`key`"
 	if common.UsingPostgreSQL {
 		keyCol = `"key"`
 	}
-	err = DB.Omit("key").Where("id = ? or name LIKE ? or "+keyCol+" = ?", common.String2Int(keyword), keyword+"%", keyword).Find(&channels).Error
+	if group != "" {
+		groupCol := "`group`"
+		if common.UsingPostgreSQL {
+			groupCol = `"group"`
+		}
+		err = DB.Omit("key").Where("(id = ? or name LIKE ? or "+keyCol+" = ?) and "+groupCol+" LIKE ?", common.String2Int(keyword), keyword+"%", keyword, "%"+group+"%").Find(&channels).Error
+	} else {
+		err = DB.Omit("key").Where("id = ? or name LIKE ? or "+keyCol+" = ?", common.String2Int(keyword), keyword+"%", keyword).Find(&channels).Error
+	}
 	return channels, err
 }
 
@@ -72,11 +86,38 @@ func BatchInsertChannels(channels []Channel) error {
 	return nil
 }
 
+func BatchDeleteChannels(ids []int) error {
+	//使用事务 删除channel表和channel_ability表
+	tx := DB.Begin()
+	err := tx.Where("id in (?)", ids).Delete(&Channel{}).Error
+	if err != nil {
+		// 回滚事务
+		tx.Rollback()
+		return err
+	}
+	err = tx.Where("channel_id in (?)", ids).Delete(&Ability{}).Error
+	if err != nil {
+		// 回滚事务
+		tx.Rollback()
+		return err
+	}
+	// 提交事务
+	tx.Commit()
+	return err
+}
+
 func (channel *Channel) GetPriority() int64 {
 	if channel.Priority == nil {
 		return 0
 	}
 	return *channel.Priority
+}
+
+func (channel *Channel) GetWeight() int {
+	if channel.Weight == nil {
+		return 0
+	}
+	return int(*channel.Weight)
 }
 
 func (channel *Channel) GetBaseURL() string {

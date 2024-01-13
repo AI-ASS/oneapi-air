@@ -1,20 +1,34 @@
 package model
 
 import (
+	"errors"
+	"fmt"
 	"one-api/common"
 	"strings"
 )
 
 type Ability struct {
-	Group     string `json:"group" gorm:"type:varchar(32);primaryKey;autoIncrement:false"`
-	Model     string `json:"model" gorm:"primaryKey;autoIncrement:false"`
+	Group     string `json:"group" gorm:"type:varchar(64);primaryKey;autoIncrement:false"`
+	Model     string `json:"model" gorm:"type:varchar(64);primaryKey;autoIncrement:false"`
 	ChannelId int    `json:"channel_id" gorm:"primaryKey;autoIncrement:false;index"`
 	Enabled   bool   `json:"enabled"`
 	Priority  *int64 `json:"priority" gorm:"bigint;default:0;index"`
+	Weight    uint   `json:"weight" gorm:"default:0;index"`
+}
+
+func GetGroupModels(group string) []string {
+	var models []string
+	// Find distinct models
+	groupCol := "`group`"
+	if common.UsingPostgreSQL {
+		groupCol = `"group"`
+	}
+	DB.Table("abilities").Where(groupCol+" = ? and enabled = ?", group, true).Distinct("model").Pluck("model", &models)
+	return models
 }
 
 func GetRandomSatisfiedChannel(group string, model string) (*Channel, error) {
-	ability := Ability{}
+	var abilities []Ability
 	groupCol := "`group`"
 	trueVal := "1"
 	if common.UsingPostgreSQL {
@@ -26,16 +40,39 @@ func GetRandomSatisfiedChannel(group string, model string) (*Channel, error) {
 	maxPrioritySubQuery := DB.Model(&Ability{}).Select("MAX(priority)").Where(groupCol+" = ? and model = ? and enabled = "+trueVal, group, model)
 	channelQuery := DB.Where(groupCol+" = ? and model = ? and enabled = "+trueVal+" and priority = (?)", group, model, maxPrioritySubQuery)
 	if common.UsingSQLite || common.UsingPostgreSQL {
-		err = channelQuery.Order("RANDOM()").First(&ability).Error
+		err = channelQuery.Order("weight DESC").Find(&abilities).Error
 	} else {
-		err = channelQuery.Order("RAND()").First(&ability).Error
+		err = channelQuery.Order("weight DESC").Find(&abilities).Error
 	}
 	if err != nil {
 		return nil, err
 	}
 	channel := Channel{}
-	channel.Id = ability.ChannelId
-	err = DB.First(&channel, "id = ?", ability.ChannelId).Error
+	if len(abilities) > 0 {
+		// Randomly choose one
+		weightSum := uint(0)
+		for _, ability_ := range abilities {
+			weightSum += ability_.Weight
+		}
+		if weightSum == 0 {
+			// All weight is 0, randomly choose one
+			channel.Id = abilities[common.GetRandomInt(len(abilities))].ChannelId
+		} else {
+			// Randomly choose one
+			weight := common.GetRandomInt(int(weightSum))
+			for _, ability_ := range abilities {
+				weight -= int(ability_.Weight)
+				//log.Printf("weight: %d, ability weight: %d", weight, *ability_.Weight)
+				if weight <= 0 {
+					channel.Id = ability_.ChannelId
+					break
+				}
+			}
+		}
+	} else {
+		return nil, errors.New("channel not found")
+	}
+	err = DB.First(&channel, "id = ?", channel.Id).Error
 	return &channel, err
 }
 
@@ -51,6 +88,7 @@ func (channel *Channel) AddAbilities() error {
 				ChannelId: channel.Id,
 				Enabled:   channel.Status == common.ChannelStatusEnabled,
 				Priority:  channel.Priority,
+				Weight:    uint(channel.GetWeight()),
 			}
 			abilities = append(abilities, ability)
 		}
@@ -81,4 +119,47 @@ func (channel *Channel) UpdateAbilities() error {
 
 func UpdateAbilityStatus(channelId int, status bool) error {
 	return DB.Model(&Ability{}).Where("channel_id = ?", channelId).Select("enabled").Update("enabled", status).Error
+}
+
+func FixAbility() (int, error) {
+	var channelIds []int
+	count := 0
+	// Find all channel ids from channel table
+	err := DB.Model(&Channel{}).Pluck("id", &channelIds).Error
+	if err != nil {
+		common.SysError(fmt.Sprintf("Get channel ids from channel table failed: %s", err.Error()))
+		return 0, err
+	}
+	// Delete abilities of channels that are not in channel table
+	err = DB.Where("channel_id NOT IN (?)", channelIds).Delete(&Ability{}).Error
+	if err != nil {
+		common.SysError(fmt.Sprintf("Delete abilities of channels that are not in channel table failed: %s", err.Error()))
+		return 0, err
+	}
+	common.SysLog(fmt.Sprintf("Delete abilities of channels that are not in channel table successfully, ids: %v", channelIds))
+	count += len(channelIds)
+
+	// Use channelIds to find channel not in abilities table
+	var abilityChannelIds []int
+	err = DB.Model(&Ability{}).Pluck("channel_id", &abilityChannelIds).Error
+	if err != nil {
+		common.SysError(fmt.Sprintf("Get channel ids from abilities table failed: %s", err.Error()))
+		return 0, err
+	}
+	var channels []Channel
+	err = DB.Where("id NOT IN (?)", abilityChannelIds).Find(&channels).Error
+	if err != nil {
+		return 0, err
+	}
+	for _, channel := range channels {
+		err := channel.UpdateAbilities()
+		if err != nil {
+			common.SysError(fmt.Sprintf("Update abilities of channel %d failed: %s", channel.Id, err.Error()))
+		} else {
+			common.SysLog(fmt.Sprintf("Update abilities of channel %d successfully", channel.Id))
+			count++
+		}
+	}
+	InitChannelCache()
+	return count, nil
 }

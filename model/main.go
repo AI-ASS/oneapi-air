@@ -53,6 +53,14 @@ func chooseDB() (*gorm.DB, error) {
 		}
 		// Use MySQL
 		common.SysLog("using MySQL as database")
+		// check parseTime
+		if !strings.Contains(dsn, "parseTime") {
+			if strings.Contains(dsn, "?") {
+				dsn += "&parseTime=true"
+			} else {
+				dsn += "?parseTime=true"
+			}
+		}
 		return gorm.Open(mysql.Open(dsn), &gorm.Config{
 			PrepareStmt: true, // precompile SQL
 		})
@@ -110,6 +118,10 @@ func InitDB() (err error) {
 			return err
 		}
 		err = db.AutoMigrate(&Log{})
+		if err != nil {
+			return err
+		}
+		err = db.AutoMigrate(&QuotaData{})
 		if err != nil {
 			return err
 		}

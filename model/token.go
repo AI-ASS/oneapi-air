@@ -5,20 +5,24 @@ import (
 	"fmt"
 	"gorm.io/gorm"
 	"one-api/common"
+	"strconv"
+	"strings"
 )
 
 type Token struct {
-	Id             int    `json:"id"`
-	UserId         int    `json:"user_id"`
-	Key            string `json:"key" gorm:"type:char(48);uniqueIndex"`
-	Status         int    `json:"status" gorm:"default:1"`
-	Name           string `json:"name" gorm:"index" `
-	CreatedTime    int64  `json:"created_time" gorm:"bigint"`
-	AccessedTime   int64  `json:"accessed_time" gorm:"bigint"`
-	ExpiredTime    int64  `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
-	RemainQuota    int    `json:"remain_quota" gorm:"default:0"`
-	UnlimitedQuota bool   `json:"unlimited_quota" gorm:"default:false"`
-	UsedQuota      int    `json:"used_quota" gorm:"default:0"` // used quota
+	Id                 int    `json:"id"`
+	UserId             int    `json:"user_id"`
+	Key                string `json:"key" gorm:"type:char(48);uniqueIndex"`
+	Status             int    `json:"status" gorm:"default:1"`
+	Name               string `json:"name" gorm:"index" `
+	CreatedTime        int64  `json:"created_time" gorm:"bigint"`
+	AccessedTime       int64  `json:"accessed_time" gorm:"bigint"`
+	ExpiredTime        int64  `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
+	RemainQuota        int    `json:"remain_quota" gorm:"default:0"`
+	UnlimitedQuota     bool   `json:"unlimited_quota" gorm:"default:false"`
+	ModelLimitsEnabled bool   `json:"model_limits_enabled" gorm:"default:false"`
+	ModelLimits        string `json:"model_limits" gorm:"type:varchar(1024);default:''"`
+	UsedQuota          int    `json:"used_quota" gorm:"default:0"` // used quota
 }
 
 func GetAllUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
@@ -28,8 +32,11 @@ func GetAllUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
 	return tokens, err
 }
 
-func SearchUserTokens(userId int, keyword string) (tokens []*Token, err error) {
-	err = DB.Where("user_id = ?", userId).Where("name LIKE ?", keyword+"%").Find(&tokens).Error
+func SearchUserTokens(userId int, keyword string, token string) (tokens []*Token, err error) {
+	if token != "" {
+		token = strings.Trim(token, "sk-")
+	}
+	err = DB.Where("user_id = ?", userId).Where("name LIKE ?", "%"+keyword+"%").Where("`key` LIKE ?", "%"+token+"%").Find(&tokens).Error
 	return tokens, err
 }
 
@@ -106,7 +113,7 @@ func (token *Token) Insert() error {
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() error {
 	var err error
-	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota").Updates(token).Error
+	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota", "model_limits_enabled", "model_limits").Updates(token).Error
 	return err
 }
 
@@ -119,6 +126,36 @@ func (token *Token) Delete() error {
 	var err error
 	err = DB.Delete(token).Error
 	return err
+}
+
+func (token *Token) IsModelLimitsEnabled() bool {
+	return token.ModelLimitsEnabled
+}
+
+func (token *Token) GetModelLimits() []string {
+	if token.ModelLimits == "" {
+		return []string{}
+	}
+	return strings.Split(token.ModelLimits, ",")
+}
+
+func (token *Token) GetModelLimitsMap() map[string]bool {
+	limits := token.GetModelLimits()
+	limitsMap := make(map[string]bool)
+	for _, limit := range limits {
+		limitsMap[limit] = true
+	}
+	return limitsMap
+}
+
+func DisableModelLimits(tokenId int) error {
+	token, err := GetTokenById(tokenId)
+	if err != nil {
+		return err
+	}
+	token.ModelLimitsEnabled = false
+	token.ModelLimits = ""
+	return token.Update()
 }
 
 func DeleteTokenById(id int, userId int) (err error) {
@@ -178,58 +215,37 @@ func decreaseTokenQuota(id int, quota int) (err error) {
 	return err
 }
 
-func PreConsumeTokenQuota(tokenId int, quota int) (err error) {
+func PreConsumeTokenQuota(tokenId int, quota int) (userQuota int, err error) {
 	if quota < 0 {
-		return errors.New("quota 不能为负数！")
+		return 0, errors.New("quota 不能为负数！")
 	}
 	token, err := GetTokenById(tokenId)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if !token.UnlimitedQuota && token.RemainQuota < quota {
-		return errors.New("令牌额度不足")
+		return 0, errors.New("令牌额度不足")
 	}
-	userQuota, err := GetUserQuota(token.UserId)
+	userQuota, err = GetUserQuota(token.UserId)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if userQuota < quota {
-		return errors.New("用户额度不足")
-	}
-	quotaTooLow := userQuota >= common.QuotaRemindThreshold && userQuota-quota < common.QuotaRemindThreshold
-	noMoreQuota := userQuota-quota <= 0
-	if quotaTooLow || noMoreQuota {
-		go func() {
-			email, err := GetUserEmail(token.UserId)
-			if err != nil {
-				common.SysError("failed to fetch user email: " + err.Error())
-			}
-			prompt := "您的额度即将用尽"
-			if noMoreQuota {
-				prompt = "您的额度已用尽"
-			}
-			if email != "" {
-				topUpLink := fmt.Sprintf("%s/topup", common.ServerAddress)
-				err = common.SendEmail(prompt, email,
-					fmt.Sprintf("%s，当前剩余额度为 %d，为了不影响您的使用，请及时充值。<br/>充值链接：<a href='%s'>%s</a>", prompt, userQuota, topUpLink, topUpLink))
-				if err != nil {
-					common.SysError("failed to send email" + err.Error())
-				}
-			}
-		}()
+		return 0, errors.New(fmt.Sprintf("用户额度不足，剩余额度为 %d", userQuota))
 	}
 	if !token.UnlimitedQuota {
 		err = DecreaseTokenQuota(tokenId, quota)
 		if err != nil {
-			return err
+			return 0, err
 		}
 	}
 	err = DecreaseUserQuota(token.UserId, quota)
-	return err
+	return userQuota - quota, err
 }
 
-func PostConsumeTokenQuota(tokenId int, quota int) (err error) {
+func PostConsumeTokenQuota(tokenId int, userQuota int, quota int, preConsumedQuota int, sendEmail bool) (err error) {
 	token, err := GetTokenById(tokenId)
+
 	if quota > 0 {
 		err = DecreaseUserQuota(token.UserId, quota)
 	} else {
@@ -238,6 +254,7 @@ func PostConsumeTokenQuota(tokenId int, quota int) (err error) {
 	if err != nil {
 		return err
 	}
+
 	if !token.UnlimitedQuota {
 		if quota > 0 {
 			err = DecreaseTokenQuota(tokenId, quota)
@@ -248,5 +265,34 @@ func PostConsumeTokenQuota(tokenId int, quota int) (err error) {
 			return err
 		}
 	}
+
+	if sendEmail {
+		if (quota + preConsumedQuota) != 0 {
+			quotaTooLow := userQuota >= common.QuotaRemindThreshold && userQuota-(quota+preConsumedQuota) < common.QuotaRemindThreshold
+			noMoreQuota := userQuota-(quota+preConsumedQuota) <= 0
+			if quotaTooLow || noMoreQuota {
+				go func() {
+					email, err := GetUserEmail(token.UserId)
+					if err != nil {
+						common.SysError("failed to fetch user email: " + err.Error())
+					}
+					prompt := "您的额度即将用尽"
+					if noMoreQuota {
+						prompt = "您的额度已用尽"
+					}
+					if email != "" {
+						topUpLink := fmt.Sprintf("%s/topup", common.ServerAddress)
+						err = common.SendEmail(prompt, email,
+							fmt.Sprintf("%s，当前剩余额度为 %d，为了不影响您的使用，请及时充值。<br/>充值链接：<a href='%s'>%s</a>", prompt, userQuota, topUpLink, topUpLink))
+						if err != nil {
+							common.SysError("failed to send email" + err.Error())
+						}
+						common.SysLog("user quota is low, consumed quota: " + strconv.Itoa(quota) + ", user quota: " + strconv.Itoa(userQuota))
+					}
+				}()
+			}
+		}
+	}
+
 	return nil
 }

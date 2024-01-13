@@ -42,7 +42,7 @@ func Distribute() func(c *gin.Context) {
 			var modelRequest ModelRequest
 			err := common.UnmarshalBodyReusable(c, &modelRequest)
 			if err != nil {
-				abortWithMessage(c, http.StatusBadRequest, "无效的请求")
+				abortWithMessage(c, http.StatusBadRequest, "无效的请求: "+err.Error())
 				return
 			}
 			if strings.HasPrefix(c.Request.URL.Path, "/v1/moderations") {
@@ -62,23 +62,60 @@ func Distribute() func(c *gin.Context) {
 			}
 			if strings.HasPrefix(c.Request.URL.Path, "/v1/audio/transcriptions") || strings.HasPrefix(c.Request.URL.Path, "/v1/audio/translations") {
 				if modelRequest.Model == "" {
-					modelRequest.Model = "whisper-1"
+					if strings.HasPrefix(c.Request.URL.Path, "/v1/audio/speech") {
+						modelRequest.Model = "tts-1"
+					} else {
+						modelRequest.Model = "whisper-1"
+					}
+				}
+			}
+			// check token model mapping
+			modelLimitEnable := c.GetBool("token_model_limit_enabled")
+			if modelLimitEnable {
+				s, ok := c.Get("token_model_limit")
+				var tokenModelLimit map[string]bool
+				if ok {
+					tokenModelLimit = s.(map[string]bool)
+				} else {
+					tokenModelLimit = map[string]bool{}
+				}
+				if tokenModelLimit != nil {
+					if _, ok := tokenModelLimit[modelRequest.Model]; !ok {
+						abortWithMessage(c, http.StatusForbidden, "该令牌无权访问模型 "+modelRequest.Model)
+						return
+					}
+				} else {
+					// token model limit is empty, all models are not allowed
+					abortWithMessage(c, http.StatusForbidden, "该令牌无权访问任何模型")
+					return
 				}
 			}
 			channel, err = model.CacheGetRandomSatisfiedChannel(userGroup, modelRequest.Model)
 			if err != nil {
 				message := fmt.Sprintf("当前分组 %s 下对于模型 %s 无可用渠道", userGroup, modelRequest.Model)
+				// 如果错误，但是渠道不为空，说明是数据库一致性问题
 				if channel != nil {
 					common.SysError(fmt.Sprintf("渠道不存在：%d", channel.Id))
 					message = "数据库一致性已被破坏，请联系管理员"
 				}
+				// 如果错误，而且渠道为空，说明是没有可用渠道
 				abortWithMessage(c, http.StatusServiceUnavailable, message)
+				return
+			}
+			if channel == nil {
+				abortWithMessage(c, http.StatusServiceUnavailable, fmt.Sprintf("当前分组 %s 下对于模型 %s 无可用渠道（数据库一致性已被破坏）", userGroup, modelRequest.Model))
 				return
 			}
 		}
 		c.Set("channel", channel.Type)
 		c.Set("channel_id", channel.Id)
 		c.Set("channel_name", channel.Name)
+		ban := true
+		// parse *int to bool
+		if channel.AutoBan != nil && *channel.AutoBan == 0 {
+			ban = false
+		}
+		c.Set("auto_ban", ban)
 		c.Set("model_mapping", channel.GetModelMapping())
 		c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
 		c.Set("base_url", channel.GetBaseURL())

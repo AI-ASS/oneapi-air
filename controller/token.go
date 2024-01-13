@@ -11,10 +11,16 @@ import (
 func GetAllTokens(c *gin.Context) {
 	userId := c.GetInt("id")
 	p, _ := strconv.Atoi(c.Query("p"))
+	size, _ := strconv.Atoi(c.Query("size"))
 	if p < 0 {
 		p = 0
 	}
-	tokens, err := model.GetAllUserTokens(userId, p*common.ItemsPerPage, common.ItemsPerPage)
+	if size <= 0 {
+		size = common.ItemsPerPage
+	} else if size > 100 {
+		size = 100
+	}
+	tokens, err := model.GetAllUserTokens(userId, p*size, size)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -33,7 +39,8 @@ func GetAllTokens(c *gin.Context) {
 func SearchTokens(c *gin.Context) {
 	userId := c.GetInt("id")
 	keyword := c.Query("keyword")
-	tokens, err := model.SearchUserTokens(userId, keyword)
+	token := c.Query("token")
+	tokens, err := model.SearchUserTokens(userId, keyword, token)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -117,14 +124,16 @@ func AddToken(c *gin.Context) {
 		return
 	}
 	cleanToken := model.Token{
-		UserId:         c.GetInt("id"),
-		Name:           token.Name,
-		Key:            common.GenerateKey(),
-		CreatedTime:    common.GetTimestamp(),
-		AccessedTime:   common.GetTimestamp(),
-		ExpiredTime:    token.ExpiredTime,
-		RemainQuota:    token.RemainQuota,
-		UnlimitedQuota: token.UnlimitedQuota,
+		UserId:             c.GetInt("id"),
+		Name:               token.Name,
+		Key:                common.GenerateKey(),
+		CreatedTime:        common.GetTimestamp(),
+		AccessedTime:       common.GetTimestamp(),
+		ExpiredTime:        token.ExpiredTime,
+		RemainQuota:        token.RemainQuota,
+		UnlimitedQuota:     token.UnlimitedQuota,
+		ModelLimitsEnabled: token.ModelLimitsEnabled,
+		ModelLimits:        token.ModelLimits,
 	}
 	err = cleanToken.Insert()
 	if err != nil {
@@ -210,6 +219,8 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.ExpiredTime = token.ExpiredTime
 		cleanToken.RemainQuota = token.RemainQuota
 		cleanToken.UnlimitedQuota = token.UnlimitedQuota
+		cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
+		cleanToken.ModelLimits = token.ModelLimits
 	}
 	err = cleanToken.Update()
 	if err != nil {
