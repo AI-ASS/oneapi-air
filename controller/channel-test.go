@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"one-api/common"
 	"one-api/model"
@@ -20,8 +19,6 @@ func testChannel(channel *model.Channel, request ChatRequest) (err error, openai
 	switch channel.Type {
 	case common.ChannelTypePaLM:
 		fallthrough
-	case common.ChannelTypeGemini:
-		fallthrough
 	case common.ChannelTypeAnthropic:
 		fallthrough
 	case common.ChannelTypeBaidu:
@@ -31,6 +28,8 @@ func testChannel(channel *model.Channel, request ChatRequest) (err error, openai
 	case common.ChannelTypeAli:
 		fallthrough
 	case common.ChannelType360:
+		fallthrough
+	case common.ChannelTypeGemini:
 		fallthrough
 	case common.ChannelTypeXunfei:
 		return errors.New("该渠道类型当前版本不支持测试，请手动测试"), nil
@@ -46,14 +45,14 @@ func testChannel(channel *model.Channel, request ChatRequest) (err error, openai
 	}
 	requestURL := common.ChannelBaseURLs[channel.Type]
 	if channel.Type == common.ChannelTypeAzure {
-		requestURL = getFullRequestURL(channel.GetBaseURL(), fmt.Sprintf("/openai/deployments/%s/chat/completions?api-version=2023-03-15-preview", request.Model), channel.Type)
+		requestURL = fmt.Sprintf("%s/openai/deployments/%s/chat/completions?api-version=2023-03-15-preview", channel.GetBaseURL(), request.Model)
 	} else {
-		if baseURL := channel.GetBaseURL(); len(baseURL) > 0 {
-			requestURL = baseURL
+		if channel.GetBaseURL() != "" {
+			requestURL = channel.GetBaseURL()
 		}
-
-		requestURL = getFullRequestURL(requestURL, "/v1/chat/completions", channel.Type)
+		requestURL += "/v1/chat/completions"
 	}
+
 	jsonData, err := json.Marshal(request)
 	if err != nil {
 		return err, nil
@@ -74,18 +73,11 @@ func testChannel(channel *model.Channel, request ChatRequest) (err error, openai
 	}
 	defer resp.Body.Close()
 	var response TextResponse
-	body, err := io.ReadAll(resp.Body)
+	err = json.NewDecoder(resp.Body).Decode(&response)
 	if err != nil {
 		return err, nil
 	}
-	err = json.Unmarshal(body, &response)
-	if err != nil {
-		return fmt.Errorf("Error: %s\nResp body: %s", err, body), nil
-	}
 	if response.Usage.CompletionTokens == 0 {
-		if response.Error.Message == "" {
-			response.Error.Message = "补全 tokens 非预期返回 0"
-		}
 		return errors.New(fmt.Sprintf("type %s, code %v, message %s", response.Error.Type, response.Error.Code, response.Error.Message)), &response.Error
 	}
 	return nil, nil
@@ -96,9 +88,10 @@ func buildTestRequest() *ChatRequest {
 		Model:     "", // this will be set later
 		MaxTokens: 1,
 	}
+	content, _ := json.Marshal("hi")
 	testMessage := Message{
 		Role:    "user",
-		Content: "hi",
+		Content: content,
 	}
 	testRequest.Messages = append(testRequest.Messages, testMessage)
 	return testRequest
@@ -147,30 +140,18 @@ func TestChannel(c *gin.Context) {
 var testAllChannelsLock sync.Mutex
 var testAllChannelsRunning bool = false
 
-func notifyRootUser(subject string, content string) {
+// disable & notify
+func disableChannel(channelId int, channelName string, reason string) {
 	if common.RootUserEmail == "" {
 		common.RootUserEmail = model.GetRootUserEmail()
 	}
+	model.UpdateChannelStatusById(channelId, common.ChannelStatusAutoDisabled)
+	subject := fmt.Sprintf("通道「%s」（#%d）已被禁用", channelName, channelId)
+	content := fmt.Sprintf("通道「%s」（#%d）已被禁用，原因：%s", channelName, channelId, reason)
 	err := common.SendEmail(subject, common.RootUserEmail, content)
 	if err != nil {
 		common.SysError(fmt.Sprintf("failed to send email: %s", err.Error()))
 	}
-}
-
-// disable & notify
-func disableChannel(channelId int, channelName string, reason string) {
-	model.UpdateChannelStatusById(channelId, common.ChannelStatusAutoDisabled)
-	subject := fmt.Sprintf("通道「%s」（#%d）已被禁用", channelName, channelId)
-	content := fmt.Sprintf("通道「%s」（#%d）已被禁用，原因：%s", channelName, channelId, reason)
-	notifyRootUser(subject, content)
-}
-
-// enable & notify
-func enableChannel(channelId int, channelName string) {
-	model.UpdateChannelStatusById(channelId, common.ChannelStatusEnabled)
-	subject := fmt.Sprintf("通道「%s」（#%d）已被启用", channelName, channelId)
-	content := fmt.Sprintf("通道「%s」（#%d）已被启用", channelName, channelId)
-	notifyRootUser(subject, content)
 }
 
 func testAllChannels(notify bool) error {
@@ -184,7 +165,7 @@ func testAllChannels(notify bool) error {
 	}
 	testAllChannelsRunning = true
 	testAllChannelsLock.Unlock()
-	channels, err := model.GetAllChannels(0, 0, true)
+	channels, err := model.GetAllChannels(0, 0, true, false)
 	if err != nil {
 		return err
 	}
@@ -195,20 +176,29 @@ func testAllChannels(notify bool) error {
 	}
 	go func() {
 		for _, channel := range channels {
-			isChannelEnabled := channel.Status == common.ChannelStatusEnabled
+			if channel.Status != common.ChannelStatusEnabled {
+				continue
+			}
 			tik := time.Now()
 			err, openaiErr := testChannel(channel, *testRequest)
 			tok := time.Now()
 			milliseconds := tok.Sub(tik).Milliseconds()
-			if isChannelEnabled && milliseconds > disableThreshold {
+
+			ban := false
+			if milliseconds > disableThreshold {
 				err = errors.New(fmt.Sprintf("响应时间 %.2fs 超过阈值 %.2fs", float64(milliseconds)/1000.0, float64(disableThreshold)/1000.0))
-				disableChannel(channel.Id, channel.Name, err.Error())
+				ban = true
 			}
-			if isChannelEnabled && shouldDisableChannel(openaiErr, -1) {
-				disableChannel(channel.Id, channel.Name, err.Error())
+			if openaiErr != nil {
+				err = errors.New(fmt.Sprintf("type %s, code %v, message %s", openaiErr.Type, openaiErr.Code, openaiErr.Message))
+				ban = true
 			}
-			if !isChannelEnabled && shouldEnableChannel(err, openaiErr) {
-				enableChannel(channel.Id, channel.Name)
+			// parse *int to bool
+			if channel.AutoBan != nil && *channel.AutoBan == 0 {
+				ban = false
+			}
+			if shouldDisableChannel(openaiErr, -1) && ban {
+				disableChannel(channel.Id, channel.Name, err.Error())
 			}
 			channel.UpdateResponseTime(milliseconds)
 			time.Sleep(common.RequestInterval)

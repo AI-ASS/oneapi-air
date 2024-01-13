@@ -11,17 +11,17 @@ const OperationSetting = () => {
         QuotaRemindThreshold: 0,
         PreConsumedQuota: 0,
         ModelRatio: '',
-        ModelPrice: '',
         GroupRatio: '',
         TopUpLink: '',
         ChatLink: '',
         QuotaPerUnit: 0,
         AutomaticDisableChannelEnabled: '',
+        AutomaticEnableChannelEnabled: '',
         ChannelDisableThreshold: 0,
         LogConsumeEnabled: '',
         DisplayInCurrencyEnabled: '',
         DisplayTokenStatEnabled: '',
-        DrawingEnabled: '',
+        ApproximateTokenEnabled: '',
         DataExportEnabled: '',
         DataExportDefaultTime: 'hour',
         DataExportInterval: 5,
@@ -42,7 +42,7 @@ const OperationSetting = () => {
         if (success) {
             let newInputs = {};
             data.forEach((item) => {
-                if (item.key === 'ModelRatio' || item.key === 'GroupRatio' || item.key === 'ModelPrice') {
+                if (item.key === 'ModelRatio' || item.key === 'GroupRatio') {
                     item.value = JSON.stringify(JSON.parse(item.value), null, 2);
                 }
                 newInputs[item.key] = item.value;
@@ -77,10 +77,7 @@ const OperationSetting = () => {
     };
 
     const handleInputChange = async (e, { name, value }) => {
-        if (name.endsWith('Enabled') || name === 'DataExportInterval' || name === 'DataExportDefaultTime') {
-            if (name === 'DataExportDefaultTime') {
-                localStorage.setItem('data_export_default_time', value);
-            }
+        if (name.endsWith('Enabled')) {
             await updateOption(name, value);
         } else {
             setInputs((inputs) => ({ ...inputs, [name]: value }));
@@ -111,13 +108,6 @@ const OperationSetting = () => {
                         return;
                     }
                     await updateOption('GroupRatio', inputs.GroupRatio);
-                }
-                if (originInputs['ModelPrice'] !== inputs.ModelPrice) {
-                    if (!verifyJSON(inputs.ModelPrice)) {
-                        showError('模型固定价格不是合法的 JSON 字符串');
-                        return;
-                    }
-                    await updateOption('ModelPrice', inputs.ModelPrice);
                 }
                 break;
             case 'quota':
@@ -161,6 +151,7 @@ const OperationSetting = () => {
         }
         showError('日志清理失败：' + message);
     };
+
     return (
         <Grid columns={1}>
             <Grid.Column>
@@ -222,10 +213,17 @@ const OperationSetting = () => {
                             name='DisplayTokenStatEnabled'
                             onChange={handleInputChange}
                         />
+                        <Form.Checkbox
+                            checked={inputs.ApproximateTokenEnabled === 'true'}
+                            label='使用近似的方式估算 token 数以减少计算量'
+                            name='ApproximateTokenEnabled'
+                            onChange={handleInputChange}
+                        />
                     </Form.Group>
                     <Form.Button onClick={() => {
                         submitConfig('general').then();
-                    }}>保存通用设置</Form.Button><Divider />
+                    }}>保存通用设置</Form.Button>
+                    <Divider />
                     <Header as='h3'>
                         日志设置
                     </Header>
@@ -312,6 +310,12 @@ const OperationSetting = () => {
                             name='AutomaticDisableChannelEnabled'
                             onChange={handleInputChange}
                         />
+                        <Form.Checkbox
+                            checked={inputs.AutomaticEnableChannelEnabled === 'true'}
+                            label='成功时自动启用通道'
+                            name='AutomaticEnableChannelEnabled'
+                            onChange={handleInputChange}
+                        />
                     </Form.Group>
                     <Form.Button onClick={() => {
                         submitConfig('monitor').then();
@@ -371,17 +375,6 @@ const OperationSetting = () => {
                     </Header>
                     <Form.Group widths='equal'>
                         <Form.TextArea
-                            label='模型固定价格（一次调用消耗多少刀，优先级大于模型倍率）'
-                            name='ModelPrice'
-                            onChange={handleInputChange}
-                            style={{ minHeight: 250, fontFamily: 'JetBrains Mono, Consolas' }}
-                            autoComplete='new-password'
-                            value={inputs.ModelPrice}
-                            placeholder='为一个 JSON 文本，键为模型名称，值为一次调用消耗多少刀，比如 "gpt-4-gizmo-*": 0.1，一次消耗0.1刀'
-                        />
-                    </Form.Group>
-                    <Form.Group widths='equal'>
-                        <Form.TextArea
                             label='模型倍率'
                             name='ModelRatio'
                             onChange={handleInputChange}
@@ -408,8 +401,7 @@ const OperationSetting = () => {
                 </Form>
             </Grid.Column>
         </Grid>
-    )
-        ;
+    );
 };
 
 export default OperationSetting;

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"gorm.io/gorm"
 	"one-api/common"
-	"strconv"
 	"strings"
 )
 
@@ -45,43 +44,39 @@ func ValidateUserToken(key string) (token *Token, err error) {
 		return nil, errors.New("未提供令牌")
 	}
 	token, err = CacheGetTokenByKey(key)
-	if err != nil {
-		common.SysError("CacheGetTokenByKey failed: " + err.Error())
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("无效的令牌")
+	if err == nil {
+		if token.Status == common.TokenStatusExhausted {
+			return nil, errors.New("该令牌额度已用尽 token.Status == common.TokenStatusExhausted " + key)
+		} else if token.Status == common.TokenStatusExpired {
+			return nil, errors.New("该令牌已过期")
 		}
-		return nil, errors.New("令牌验证失败")
-	}
-	if token.Status == common.TokenStatusExhausted {
-		return nil, errors.New("该令牌额度已用尽")
-	} else if token.Status == common.TokenStatusExpired {
-		return nil, errors.New("该令牌已过期")
-	}
-	if token.Status != common.TokenStatusEnabled {
-		return nil, errors.New("该令牌状态不可用")
-	}
-	if token.ExpiredTime != -1 && token.ExpiredTime < common.GetTimestamp() {
-		if !common.RedisEnabled {
-			token.Status = common.TokenStatusExpired
-			err := token.SelectUpdate()
-			if err != nil {
-				common.SysError("failed to update token status" + err.Error())
+		if token.Status != common.TokenStatusEnabled {
+			return nil, errors.New("该令牌状态不可用")
+		}
+		if token.ExpiredTime != -1 && token.ExpiredTime < common.GetTimestamp() {
+			if !common.RedisEnabled {
+				token.Status = common.TokenStatusExpired
+				err := token.SelectUpdate()
+				if err != nil {
+					common.SysError("failed to update token status" + err.Error())
+				}
 			}
+			return nil, errors.New("该令牌已过期")
 		}
-		return nil, errors.New("该令牌已过期")
-	}
-	if !token.UnlimitedQuota && token.RemainQuota <= 0 {
-		if !common.RedisEnabled {
-			// in this case, we can make sure the token is exhausted
-			token.Status = common.TokenStatusExhausted
-			err := token.SelectUpdate()
-			if err != nil {
-				common.SysError("failed to update token status" + err.Error())
+		if !token.UnlimitedQuota && token.RemainQuota <= 0 {
+			if !common.RedisEnabled {
+				// in this case, we can make sure the token is exhausted
+				token.Status = common.TokenStatusExhausted
+				err := token.SelectUpdate()
+				if err != nil {
+					common.SysError("failed to update token status" + err.Error())
+				}
 			}
+			return nil, errors.New(fmt.Sprintf("%s 该令牌额度已用尽 !token.UnlimitedQuota && token.RemainQuota = %d", token.Key, token.RemainQuota))
 		}
-		return nil, errors.New("该令牌额度已用尽")
+		return token, nil
 	}
-	return token, nil
+	return nil, errors.New("无效的令牌")
 }
 
 func GetTokenByIds(id int, userId int) (*Token, error) {
@@ -215,37 +210,58 @@ func decreaseTokenQuota(id int, quota int) (err error) {
 	return err
 }
 
-func PreConsumeTokenQuota(tokenId int, quota int) (userQuota int, err error) {
+func PreConsumeTokenQuota(tokenId int, quota int) (err error) {
 	if quota < 0 {
-		return 0, errors.New("quota 不能为负数！")
+		return errors.New("quota 不能为负数！")
 	}
 	token, err := GetTokenById(tokenId)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	if !token.UnlimitedQuota && token.RemainQuota < quota {
-		return 0, errors.New("令牌额度不足")
+		return errors.New("令牌额度不足")
 	}
-	userQuota, err = GetUserQuota(token.UserId)
+	userQuota, err := GetUserQuota(token.UserId)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	if userQuota < quota {
-		return 0, errors.New(fmt.Sprintf("用户额度不足，剩余额度为 %d", userQuota))
+		return errors.New("用户额度不足")
+	}
+	quotaTooLow := userQuota >= common.QuotaRemindThreshold && userQuota-quota < common.QuotaRemindThreshold
+	noMoreQuota := userQuota-quota <= 0
+	if quotaTooLow || noMoreQuota {
+		go func() {
+			email, err := GetUserEmail(token.UserId)
+			if err != nil {
+				common.SysError("failed to fetch user email: " + err.Error())
+			}
+			prompt := "您的额度即将用尽"
+			if noMoreQuota {
+				prompt = "您的额度已用尽"
+			}
+			if email != "" {
+				topUpLink := fmt.Sprintf("%s/topup", common.ServerAddress)
+				err = common.SendEmail(prompt, email,
+					fmt.Sprintf("%s，当前剩余额度为 %d，为了不影响您的使用，请及时充值。<br/>充值链接：<a href='%s'>%s</a>", prompt, userQuota, topUpLink, topUpLink))
+				if err != nil {
+					common.SysError("failed to send email" + err.Error())
+				}
+			}
+		}()
 	}
 	if !token.UnlimitedQuota {
 		err = DecreaseTokenQuota(tokenId, quota)
 		if err != nil {
-			return 0, err
+			return err
 		}
 	}
 	err = DecreaseUserQuota(token.UserId, quota)
-	return userQuota - quota, err
+	return err
 }
 
-func PostConsumeTokenQuota(tokenId int, userQuota int, quota int, preConsumedQuota int, sendEmail bool) (err error) {
+func PostConsumeTokenQuota(tokenId int, quota int) (err error) {
 	token, err := GetTokenById(tokenId)
-
 	if quota > 0 {
 		err = DecreaseUserQuota(token.UserId, quota)
 	} else {
@@ -254,7 +270,6 @@ func PostConsumeTokenQuota(tokenId int, userQuota int, quota int, preConsumedQuo
 	if err != nil {
 		return err
 	}
-
 	if !token.UnlimitedQuota {
 		if quota > 0 {
 			err = DecreaseTokenQuota(tokenId, quota)
@@ -265,34 +280,5 @@ func PostConsumeTokenQuota(tokenId int, userQuota int, quota int, preConsumedQuo
 			return err
 		}
 	}
-
-	if sendEmail {
-		if (quota + preConsumedQuota) != 0 {
-			quotaTooLow := userQuota >= common.QuotaRemindThreshold && userQuota-(quota+preConsumedQuota) < common.QuotaRemindThreshold
-			noMoreQuota := userQuota-(quota+preConsumedQuota) <= 0
-			if quotaTooLow || noMoreQuota {
-				go func() {
-					email, err := GetUserEmail(token.UserId)
-					if err != nil {
-						common.SysError("failed to fetch user email: " + err.Error())
-					}
-					prompt := "您的额度即将用尽"
-					if noMoreQuota {
-						prompt = "您的额度已用尽"
-					}
-					if email != "" {
-						topUpLink := fmt.Sprintf("%s/topup", common.ServerAddress)
-						err = common.SendEmail(prompt, email,
-							fmt.Sprintf("%s，当前剩余额度为 %d，为了不影响您的使用，请及时充值。<br/>充值链接：<a href='%s'>%s</a>", prompt, userQuota, topUpLink, topUpLink))
-						if err != nil {
-							common.SysError("failed to send email" + err.Error())
-						}
-						common.SysLog("user quota is low, consumed quota: " + strconv.Itoa(quota) + ", user quota: " + strconv.Itoa(userQuota))
-					}
-				}()
-			}
-		}
-	}
-
 	return nil
 }

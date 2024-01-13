@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Button, Divider, Form, Grid, Header, Message, Modal } from 'semantic-ui-react';
 import { API, showError, showSuccess } from '../helpers';
 import { marked } from 'marked';
+import { Link } from 'react-router-dom';
 
 const OtherSetting = () => {
   let [inputs, setInputs] = useState({
@@ -10,7 +11,8 @@ const OtherSetting = () => {
     About: '',
     SystemName: '',
     Logo: '',
-    HomePageContent: ''
+    HomePageContent: '',
+    Theme: ''
   });
   let [loading, setLoading] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -70,6 +72,10 @@ const OtherSetting = () => {
     await updateOption('SystemName', inputs.SystemName);
   };
 
+  const submitTheme = async () => {
+    await updateOption('Theme', inputs.Theme);
+  };
+
   const submitLogo = async () => {
     await updateOption('Logo', inputs.Logo);
   };
@@ -108,7 +114,7 @@ const OtherSetting = () => {
       <Grid.Column>
         <Form loading={loading}>
           <Header as='h3'>通用设置</Header>
-          {/*<Form.Button onClick={checkUpdate}>检查更新</Form.Button>*/}
+          <Form.Button onClick={checkUpdate}>检查更新</Form.Button>
           <Form.Group widths='equal'>
             <Form.TextArea
               label='公告'
@@ -132,6 +138,17 @@ const OtherSetting = () => {
             />
           </Form.Group>
           <Form.Button onClick={submitSystemName}>设置系统名称</Form.Button>
+          <Form.Group widths='equal'>
+            <Form.Input
+              label={<label>主题名称（<Link
+                to='https://github.com/songquanpeng/one-api/blob/main/web/README.md'>当前可用主题</Link>）</label>}
+              placeholder='请输入主题名称'
+              value={inputs.Theme}
+              name='Theme'
+              onChange={handleInputChange}
+            />
+          </Form.Group>
+          <Form.Button onClick={submitTheme}>设置主题（重启生效）</Form.Button>
           <Form.Group widths='equal'>
             <Form.Input
               label='Logo 图片地址'
@@ -165,7 +182,8 @@ const OtherSetting = () => {
             />
           </Form.Group>
           <Form.Button onClick={submitAbout}>保存关于</Form.Button>
-          <Message>移除 One API 的版权标识必须首先获得授权，项目维护需要花费大量精力，如果本项目对你有意义，请主动支持本项目。</Message>
+          <Message>移除 One API
+            的版权标识必须首先获得授权，项目维护需要花费大量精力，如果本项目对你有意义，请主动支持本项目。</Message>
           <Form.Group widths='equal'>
             <Form.Input
               label='页脚'
@@ -178,28 +196,28 @@ const OtherSetting = () => {
           <Form.Button onClick={submitFooter}>设置页脚</Form.Button>
         </Form>
       </Grid.Column>
-      {/*<Modal*/}
-      {/*  onClose={() => setShowUpdateModal(false)}*/}
-      {/*  onOpen={() => setShowUpdateModal(true)}*/}
-      {/*  open={showUpdateModal}*/}
-      {/*>*/}
-      {/*  <Modal.Header>新版本：{updateData.tag_name}</Modal.Header>*/}
-      {/*  <Modal.Content>*/}
-      {/*    <Modal.Description>*/}
-      {/*      <div dangerouslySetInnerHTML={{ __html: updateData.content }}></div>*/}
-      {/*    </Modal.Description>*/}
-      {/*  </Modal.Content>*/}
-      {/*  <Modal.Actions>*/}
-      {/*    <Button onClick={() => setShowUpdateModal(false)}>关闭</Button>*/}
-      {/*    <Button*/}
-      {/*      content='详情'*/}
-      {/*      onClick={() => {*/}
-      {/*        setShowUpdateModal(false);*/}
-      {/*        openGitHubRelease();*/}
-      {/*      }}*/}
-      {/*    />*/}
-      {/*  </Modal.Actions>*/}
-      {/*</Modal>*/}
+      <Modal
+        onClose={() => setShowUpdateModal(false)}
+        onOpen={() => setShowUpdateModal(true)}
+        open={showUpdateModal}
+      >
+        <Modal.Header>新版本：{updateData.tag_name}</Modal.Header>
+        <Modal.Content>
+          <Modal.Description>
+            <div dangerouslySetInnerHTML={{ __html: updateData.content }}></div>
+          </Modal.Description>
+        </Modal.Content>
+        <Modal.Actions>
+          <Button onClick={() => setShowUpdateModal(false)}>关闭</Button>
+          <Button
+            content='详情'
+            onClick={() => {
+              setShowUpdateModal(false);
+              openGitHubRelease();
+            }}
+          />
+        </Modal.Actions>
+      </Modal>
     </Grid>
   );
 };

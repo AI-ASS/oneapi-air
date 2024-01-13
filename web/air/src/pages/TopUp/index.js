@@ -59,56 +59,6 @@ const TopUp = () => {
         setOpen(true);
     }
 
-    const onlineTopUp = async () => {
-        if (amount === 0) {
-            await getAmount();
-        }
-        setOpen(false);
-        try {
-            const res = await API.post('/api/user/pay', {
-                amount: parseInt(topUpCount),
-                top_up_code: topUpCode,
-                payment_method: payWay
-            });
-            if (res !== undefined) {
-                const { message, data } = res.data;
-                // showInfo(message);
-                if (message === 'success') {
-
-                    let params = data
-                    let url = res.data.url
-                    let form = document.createElement('form')
-                    form.action = url
-                    form.method = 'POST'
-                    // 判断是否为safari浏览器
-                    let isSafari = navigator.userAgent.indexOf("Safari") > -1 && navigator.userAgent.indexOf("Chrome") < 1;
-                    if (!isSafari) {
-                        form.target = '_blank'
-                    }
-                    for (let key in params) {
-                        let input = document.createElement('input')
-                        input.type = 'hidden'
-                        input.name = key
-                        input.value = params[key]
-                        form.appendChild(input)
-                    }
-                    document.body.appendChild(form)
-                    form.submit()
-                    document.body.removeChild(form)
-                } else {
-                    showError(data);
-                    // setTopUpCount(parseInt(res.data.count));
-                    // setAmount(parseInt(data));
-                }
-            } else {
-                showError(res);
-            }
-        } catch (err) {
-            console.log(err);
-        } finally {
-        }
-    }
-
     const getUserQuota = async () => {
         let res = await API.get(`/api/user/self`);
         const { success, message, data } = res.data;
@@ -174,19 +124,6 @@ const TopUp = () => {
                     <h3>我的钱包</h3>
                 </Layout.Header>
                 <Layout.Content>
-                    <Modal
-                        title="确定要充值吗"
-                        visible={open}
-                        onOk={onlineTopUp}
-                        onCancel={handleCancel}
-                        maskClosable={false}
-                        size={'small'}
-                        centered={true}
-                    >
-                        <p>充值数量：{topUpCount}$</p>
-                        <p>实付金额：{renderAmount()}</p>
-                        <p>是否确认充值？</p>
-                    </Modal>
                     <div style={{ marginTop: 20, display: 'flex', justifyContent: 'center' }}>
                         <Card
                             style={{ width: '500px', padding: '20px' }}
@@ -217,43 +154,6 @@ const TopUp = () => {
                                         <Button type={"warning"} theme={'solid'} onClick={topUp}
                                             disabled={isSubmitting}>
                                             {isSubmitting ? '兑换中...' : '兑换'}
-                                        </Button>
-                                    </Space>
-                                </Form>
-                            </div>
-                            <div style={{ marginTop: 20 }}>
-                                <Divider>
-                                    在线充值
-                                </Divider>
-                                <Form>
-                                    <Form.Input
-                                        field={'redemptionCount'}
-                                        label={'实付金额：' + renderAmount()}
-                                        placeholder='充值数量'
-                                        name='redemptionCount'
-                                        type={'number'}
-                                        value={topUpCount}
-                                        onChange={async (value) => {
-                                            setTopUpCount(value);
-                                            await getAmount(value);
-                                        }}
-                                    />
-                                    <Space>
-                                        <Button type={'primary'} theme={'solid'} onClick={
-                                            async () => {
-                                                preTopUp('zfb')
-                                            }
-                                        }>
-                                            支付宝
-                                        </Button>
-                                        <Button style={{ backgroundColor: 'rgba(var(--semi-green-5), 1)' }}
-                                            type={'primary'}
-                                            theme={'solid'} onClick={
-                                                async () => {
-                                                    preTopUp('wx')
-                                                }
-                                            }>
-                                            微信
                                         </Button>
                                     </Space>
                                 </Form>
